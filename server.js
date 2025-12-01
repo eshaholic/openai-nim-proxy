@@ -132,13 +132,13 @@ app.post('/v1/chat/completions', async (req, res) => {
             }
 
             try {
-              const jsonString = line.slice(6).trim(); // 공백 제거
+              const jsonString = line.slice(6).trim();
               
-              if (!jsonString.startsWith('{') || jsonString === '') { // JSON 유효성 검증 추가
+              if (!jsonString.startsWith('{') || jsonString === '') {
                 return; 
               }
 
-              const data = JSON.parse(jsonString); // 수정된 파싱
+              const data = JSON.parse(jsonString);
               
               if (data.choices?.[0]?.delta) {
                 const reasoning = data.choices[0].delta.reasoning_content;
@@ -166,11 +166,11 @@ app.post('/v1/chat/completions', async (req, res) => {
                     delete data.choices[0].delta.reasoning_content;
                   }
                 } else {
-                  // Reasoning Suppression Logic (버퍼 오염 방지 강화)
+                  // Reasoning Suppression Logic
                   if (content) {
                     data.choices[0].delta.content = content;
                   } else if (reasoning) { 
-                    // Content가 비고 Reasoning만 있다면, Reasoning을 공백으로 처리 (CoT 누설 방지)
+                  
                     data.choices[0].delta.content = '';
                   } else {
                     data.choices[0].delta.content = '';
@@ -180,7 +180,7 @@ app.post('/v1/chat/completions', async (req, res) => {
               }
               res.write(`data: ${JSON.stringify(data)}\n\n`);
             } catch (e) {
-              // JSON 파싱 실패 시, 해당 라인을 버리고 다음 라인으로 건너뛰어 버퍼 오염 방지
+             
               console.warn('Corrupted line discarded:', line); 
               return;
             }
