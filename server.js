@@ -6,21 +6,15 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 
-// NVIDIA NIM API configuration
 const NIM_API_BASE = process.env.NIM_API_BASE || 'https://integrate.api.nvidia.com/v1';
 const NIM_API_KEY = process.env.NIM_API_KEY;
 
-// 🔥 REASONING DISPLAY TOGGLE - Shows/hides reasoning in output
-const SHOW_REASONING = false; // Set to true to show reasoning with <think> tags
-
-// 🔥 THINKING MODE TOGGLE - Enables thinking for specific models that support it
+const SHOW_REASONING = false;
 const ENABLE_THINKING_MODE = false;
 
-// Model mapping (adjust based on available NIM models)
 const MODEL_MAPPING = {
   'gpt-3.5-turbo': 'nvidia/llama-3.1-nemotron-ultra-253b-v1',
   'gpt-4': 'qwen/qwen3-coder-480b-a35b-instruct',
@@ -31,7 +25,6 @@ const MODEL_MAPPING = {
   'gemini-pro': 'qwen/qwen3-next-80b-a3b-thinking'
 };
 
-// Health check endpoint
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
@@ -41,7 +34,6 @@ app.get('/health', (req, res) => {
   });
 });
 
-// List models endpoint (OpenAI compatible)
 app.get('/v1/models', (req, res) => {
   const models = Object.keys(MODEL_MAPPING).map(model => ({
     id: model,
@@ -56,12 +48,10 @@ app.get('/v1/models', (req, res) => {
   });
 });
 
-// Chat completions endpoint (main proxy)
 app.post('/v1/chat/completions', async (req, res) => {
   try {
     const { model, messages, temperature, max_tokens, stream } = req.body;
 
-    // Smart model selection with fallback
     let nimModel = MODEL_MAPPING[model];
     if (!nimModel) {
       try {
@@ -91,7 +81,6 @@ app.post('/v1/chat/completions', async (req, res) => {
       }
     }
 
-    // Transform OpenAI request to NIM format
     const nimRequest = {
       model: nimModel,
       messages: messages,
@@ -101,7 +90,6 @@ app.post('/v1/chat/completions', async (req, res) => {
       stream: stream || false
     };
 
-    // Make request to NVIDIA NIM API
     const response = await axios.post(`${NIM_API_BASE}/chat/completions`, nimRequest, {
       headers: {
         'Authorization': `Bearer ${NIM_API_KEY}`,
@@ -111,9 +99,8 @@ app.post('/v1/chat/completions', async (req, res) => {
     });
 
     if (stream) {
-      // Handle streaming response with reasoning - [BUFFER CONTAMINATION FIX APPLIED]
       res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control': 'no-cache');
+      res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
 
       let buffer = '';
@@ -134,8 +121,8 @@ app.post('/v1/chat/completions', async (req, res) => {
             try {
               const jsonString = line.slice(6).trim();
               
-              if (!jsonString.startsWith('{') || jsonString === '') {
-                return; 
+              if (!jsonString.startsWith('{') || jsonString === '') { 
+                return;
               }
 
               const data = JSON.parse(jsonString);
@@ -166,11 +153,9 @@ app.post('/v1/chat/completions', async (req, res) => {
                     delete data.choices[0].delta.reasoning_content;
                   }
                 } else {
-                  // Reasoning Suppression Logic
                   if (content) {
                     data.choices[0].delta.content = content;
                   } else if (reasoning) { 
-                  
                     data.choices[0].delta.content = '';
                   } else {
                     data.choices[0].delta.content = '';
@@ -180,7 +165,6 @@ app.post('/v1/chat/completions', async (req, res) => {
               }
               res.write(`data: ${JSON.stringify(data)}\n\n`);
             } catch (e) {
-             
               console.warn('Corrupted line discarded:', line); 
               return;
             }
@@ -194,7 +178,6 @@ app.post('/v1/chat/completions', async (req, res) => {
         res.end();
       });
     } else {
-      // Transform NIM response to OpenAI format with reasoning
       const openaiResponse = {
         id: `chatcmpl-${Date.now()}`,
         object: 'chat.completion',
@@ -239,7 +222,6 @@ app.post('/v1/chat/completions', async (req, res) => {
   }
 });
 
-// Catch-all for unsupported endpoints
 app.all('*', (req, res) => {
   res.status(404).json({
     error: {
