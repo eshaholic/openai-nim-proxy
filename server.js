@@ -14,9 +14,9 @@ const ENABLE_THINKING_MODE = false;
 const MODEL_MAPPING = {
   // 1. 메인 추천: Llama 3.1 405B (논리왕, 안정성 최고)
   'gpt-4o': 'meta/llama-3.1-405b-instruct',
-  'gpt-4': 'meta/llama-3.1-405b-instruct',
   // 2. 서브 추천: DeepSeek V3 (감성왕, 필력 좋음, 덜건조)
   'gpt-4-turbo': 'deepseek-ai/deepseek-v3',
+  'gpt-4': 'deepseek-ai/deepseek-v3.1-terminus',
   // 3. 속도용: Llama 3.1 70B (빠름)
   'gpt-3.5-turbo': 'meta/llama-3.1-70b-instruct'
   'claude-3-opus': 'openai/gpt-oss-120b',
