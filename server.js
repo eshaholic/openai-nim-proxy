@@ -19,10 +19,9 @@ const MODEL_MAPPING = {
   'gpt-4o': 'meta/llama-3.1-405b-instruct',
   'gpt-4': 'meta/llama-3.1-405b-instruct',
 
-  // 2. 서브 추천: DeepSeek V3 (감성왕, 필력 좋음, 덜 건조함)
-  // 제니터에서 'gpt-4-turbo'를 선택하면 이게 나옵니다.
-  // *주의: R1이 아니라 V3라서 난수 안 터집니다.
-  'gpt-4-turbo': 'deepseek-ai/deepseek-v3',
+  // 2. [서브] 제니터에서 'gpt-4-turbo' 선택 시 -> DeepSeek R1 (이젠 쓸 수 있다!)
+  // *주의: Cloud Run 타임아웃을 600초 이상으로 설정했는지 꼭 확인하세요.
+  'gpt-4-turbo': 'deepseek-ai/deepseek-r1',
 
   // 3. 속도용: Llama 3.1 70B (가볍고 빠름)
   // 제니터에서 'gpt-3.5-turbo'를 선택하면 이게 나옵니다.
