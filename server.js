@@ -4,7 +4,7 @@ const axios = require('axios');
 
 const app = express();
 // Google Cloud Run의 기본 포트(8080)를 우선 사용하도록 수정
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 3000;
 
 const NIM_API_BASE = process.env.NIM_API_BASE || 'https://integrate.api.nvidia.com/v1';
 const NIM_API_KEY = process.env.NIM_API_KEY;
