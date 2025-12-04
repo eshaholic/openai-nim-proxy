@@ -21,7 +21,7 @@ app.use(cors());
 // 모델 매핑
 const MODEL_MAPPING = {
   'gpt-4o': 'meta/llama-3.1-405b-instruct',
-  'gpt-4': 'deepseek-ai/deepseek-r1',
+  'gpt-4': 'deepseek-ai/deepseek-v3.1-terminus',
   'gpt-4-turbo': 'deepseek-ai/deepseek-r1-0528',
   'gpt-3.5-turbo': 'meta/llama-3.1-70b-instruct',
   'claude-3-opus': 'meta/llama-3.1-405b-instruct',
