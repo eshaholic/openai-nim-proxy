@@ -3,22 +3,27 @@ const cors = require('cors');
 const axios = require('axios');
 
 const app = express();
-// Google Cloud Run의 기본 포트(8080)를 우선 사용
+// 구글 클라우드 등에서 포트를 자동으로 잡아주거나, 없으면 3000번 사용
 const PORT = process.env.PORT || 3000;
 
+// [1] NVIDIA 설정 (기존 것 유지)
 const NIM_API_BASE = process.env.NIM_API_BASE || 'https://integrate.api.nvidia.com/v1';
 const NIM_API_KEY = process.env.NIM_API_KEY;
+
+// [2] Gemini 설정 (새로 추가됨)
+// ⭐ 중요: 서버 환경변수에 GEMINI_API_KEY를 꼭 추가해야 합니다!
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
 
 const SHOW_REASONING = false;
 const ENABLE_THINKING_MODE = false;
 
-// 🔴 [필수] 용량 제한 설정은 반드시 코드 최상단(app 선언 직후)에 와야 함!
-// 50mb로 대폭 상향 (텍스트/채팅로그 충분)
+// 용량 제한 설정 (파일 전송 등 고려하여 50mb로 넉넉하게)
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(cors());
 
-// 모델 매핑
+// 모델 매핑 (NVIDIA용)
 const MODEL_MAPPING = {
   'gpt-4o': 'meta/llama-3.1-405b-instruct',
   'gpt-4': 'deepseek-ai/deepseek-v3.1-terminus',
@@ -31,7 +36,7 @@ const MODEL_MAPPING = {
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
-    service: 'OpenAI to NVIDIA NIM Proxy',
+    service: 'OpenAI to NVIDIA NIM & Google Gemini Proxy',
     port: PORT
   });
 });
@@ -46,12 +51,14 @@ app.get('/v1/models', (req, res) => {
   res.json({ object: 'list', data: models });
 });
 
+// ==========================================
+// 🚪 문 1: 기존 NVIDIA 전용 (주소: /v1/chat/completions)
+// ==========================================
 app.post('/v1/chat/completions', async (req, res) => {
   try {
     const { model, messages, temperature, max_tokens, stream } = req.body;
     let nimModel = MODEL_MAPPING[model] || 'meta/llama-3.1-405b-instruct';
 
-    // 요청 구성
     const nimRequest = {
       model: nimModel,
       messages: messages,
@@ -61,15 +68,14 @@ app.post('/v1/chat/completions', async (req, res) => {
       stream: stream || false
     };
 
-    // 🔴 [핵심 수정] Axios 전송 시에도 용량 제한 해제 (maxBodyLength: Infinity)
     const response = await axios.post(`${NIM_API_BASE}/chat/completions`, nimRequest, {
       headers: {
         'Authorization': `Bearer ${NIM_API_KEY}`,
         'Content-Type': 'application/json'
       },
       responseType: stream ? 'stream' : 'json',
-      maxBodyLength: Infinity, // 전송 용량 무제한
-      maxContentLength: Infinity // 수신 용량 무제한
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity
     });
 
     if (stream) {
@@ -82,26 +88,66 @@ app.post('/v1/chat/completions', async (req, res) => {
     }
 
   } catch (error) {
-    console.error('Proxy error:', error.message);
+    console.error('NVIDIA Proxy error:', error.message);
     if (error.response) {
-        console.error('Error status:', error.response.status);
         console.error('Error data:', JSON.stringify(error.response.data).substring(0, 200));
     }
-
-    res.status(error.response?.status || 500).json({
-      error: {
-        message: error.message || 'Internal server error',
-        type: 'invalid_request_error',
-        code: error.response?.status || 500
-      }
-    });
+    res.status(error.response?.status || 500).json({ error: { message: error.message } });
   }
 });
 
+// ==========================================
+// 🚪 문 2: 새로 만든 Gemini 전용 (주소: /gemini/chat/completions)
+// ==========================================
+app.post('/gemini/chat/completions', async (req, res) => {
+    // 키가 없으면 에러
+    if (!GEMINI_API_KEY) {
+        console.error("오류: 환경변수에 GEMINI_API_KEY가 없습니다.");
+        return res.status(500).json({ error: "Server Configuration Error: Gemini API Key missing" });
+    }
+
+    try {
+        console.log("🚀 Gemini 요청 도착! 변환 시작...");
+
+        // 요청 내용 복사
+        const newBody = { ...req.body };
+
+        // ✂️ [핵심] Gemini가 싫어하는 설정(repetition_penalty) 삭제
+        if (newBody.repetition_penalty) {
+            console.log(`✂️ 호환되지 않는 설정 제거: repetition_penalty (${newBody.repetition_penalty})`);
+            delete newBody.repetition_penalty;
+        }
+
+        // 구글로 전송 (스트리밍 설정)
+        const response = await axios.post(GEMINI_URL, newBody, {
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${GEMINI_API_KEY}`
+            },
+            responseType: 'stream', 
+            maxBodyLength: Infinity,
+            maxContentLength: Infinity
+        });
+
+        // 받은 답변을 Janitor로 토스
+        response.data.pipe(res);
+
+    } catch (error) {
+        console.error("❌ Gemini Proxy 에러:", error.message);
+        if (error.response) {
+            // 구글에서 에러 메시지를 보냈으면 그대로 전달하려고 시도
+            res.status(error.response.status).end(); 
+        } else {
+            res.status(500).send({ error: "Proxy Server Error" });
+        }
+    }
+});
+
+// 그 외 주소 처리
 app.all('*', (req, res) => {
   res.status(404).json({ error: { message: `Endpoint ${req.path} not found` } });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`서버가 포트 ${PORT}에서 실행 중입니다.`);
 });
