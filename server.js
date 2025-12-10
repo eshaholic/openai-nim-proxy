@@ -70,15 +70,6 @@ app.post('/v1/chat/completions', async (req, res) => {
       const newBody = { ...req.body };
       if (newBody.repetition_penalty) delete newBody.repetition_penalty;
       
-      // 🛡️ 안전 필터 강제 해제 (BLOCK_NONE)
-      newBody.safetySettings = [
-          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
-      ];
-
-      // 구글로 전송
       const response = await axios.post(GEMINI_URL, newBody, {
         headers: {
           'Content-Type': 'application/json',
