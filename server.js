@@ -35,7 +35,6 @@ app.get('/v1/models', (req, res) => {
     created: Date.now(),
     owned_by: 'nvidia-nim-proxy'
   }));
-  // Gemini 모델 목록
   models.push({ id: 'gemini-2.5-flash', object: 'model', owned_by: 'google' });
   models.push({ id: 'gemini-1.5-flash', object: 'model', owned_by: 'google' });
   models.push({ id: 'gemini-1.5-pro', object: 'model', owned_by: 'google' });
@@ -44,33 +43,31 @@ app.get('/v1/models', (req, res) => {
 });
 
 // =================================================================
-// 🚀 통합 채팅 처리 구간 (Native 변환 모드 적용)
+// 🚀 통합 채팅 처리 구간
 // =================================================================
 app.post('/v1/chat/completions', async (req, res) => {
   const { model, messages, temperature, max_tokens, stream } = req.body;
 
   // ---------------------------------------------------------------
-  // [A] Gemini 처리 구간 (Google Native API 사용 - 검열 해제용)
+  // [A] Gemini 처리 구간 (버퍼링 모드: 끊김 완전 해결)
   // ---------------------------------------------------------------
   if (model && model.toLowerCase().includes('gemini')) {
     if (!GEMINI_API_KEY) {
         console.error("Gemini API Key missing");
-        return res.status(500).json({ error: "Gemini API Key is missing" });
+        return res.status(500).json({ error: "Gemini API Key is missing (Check Env Var Typo!)" });
     }
 
     try {
-      console.log(`🔹 Gemini Request (Native Mode): ${model}`);
+      console.log(`🔹 Gemini Request (Buffer Mode): ${model}`);
 
-      // 1. 메시지 변환 (OpenAI -> Gemini Native Format)
+      // 1. 메시지 변환
       let systemInstruction = undefined;
       const contents = [];
 
       for (const msg of messages) {
           if (msg.role === 'system') {
-              // 시스템 프롬프트 별도 분리
               systemInstruction = { parts: [{ text: msg.content }] };
           } else {
-              // user/assistant -> user/model 변환
               const role = msg.role === 'assistant' ? 'model' : 'user';
               contents.push({
                   role: role,
@@ -79,16 +76,16 @@ app.post('/v1/chat/completions', async (req, res) => {
           }
       }
 
-      // 2. 요청 본문 구성 (검열 해제 설정 포함!)
+      // 2. 요청 본문 (Native 포맷)
       const nativeBody = {
           contents: contents,
-          systemInstruction: systemInstruction, // 시스템 프롬프트 적용
+          systemInstruction: systemInstruction,
           generationConfig: {
               temperature: temperature || 0.7,
-              maxOutputTokens: max_tokens || 8192, // ⭐ 중요: OpenAI의 max_tokens를 여기로 매핑
+              maxOutputTokens: max_tokens || 8192,
               candidateCount: 1
           },
-          // 🛡️ 안전 설정: 모든 검열 끄기 (BLOCK_NONE)
+          // 🛡️ 안전 설정: 검열 완전 해제
           safetySettings: [
               { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
               { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
@@ -97,73 +94,68 @@ app.post('/v1/chat/completions', async (req, res) => {
           ]
       };
 
-      // 3. Native 엔드포인트 URL 생성
-      // model 이름이 'gemini-2.5-flash' 처럼 들어오면 그대로 사용
+      // 3. Native URL (generateContent 사용 - 스트림 아님!)
+      // *중요: streamGenerateContent 대신 generateContent를 써서 한방에 받습니다.*
       const targetModel = model.startsWith('gemini') ? model : 'gemini-1.5-flash';
-      const nativeUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:streamGenerateContent?key=${GEMINI_API_KEY}`;
+      const nativeUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${GEMINI_API_KEY}`;
 
-      // 4. 전송
+      // 4. 구글에 요청 (await로 끝까지 기다림)
       const response = await axios.post(nativeUrl, nativeBody, {
-        headers: { 'Content-Type': 'application/json' },
-        responseType: 'stream'
+        headers: { 'Content-Type': 'application/json' }
       });
 
-      // 5. 스트림 변환 (Google Stream -> OpenAI Stream)
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
+      // 5. 응답 추출
+      const text = response.data.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
-      response.data.on('data', (chunk) => {
-        try {
-            const lines = chunk.toString().split('\n');
-            for (const line of lines) {
-                if (!line.trim()) continue;
-                // 구글은 "data: " 접두사 없이 JSON 배열을 보냄 (보정 필요)
-                let cleanLine = line.replace(/^data: /, '').trim();
-                if (cleanLine === '[' || cleanLine === ']' || cleanLine === ',') continue; // 배열 괄호/콤마 무시
+      // 6. Janitor에게 응답 전송
+      if (stream) {
+          // Janitor가 스트리밍을 원하면, 우리가 받은 전체 텍스트를 스트리밍인 척 보냅니다.
+          res.setHeader('Content-Type', 'text/event-stream');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Connection', 'keep-alive');
 
-                // 구글 응답 파싱
-                try {
-                   const parsed = JSON.parse(cleanLine);
-                   const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
-                   
-                   if (text) {
-                       // OpenAI 포맷으로 변환하여 클라이언트에 전송
-                       const openaiChunk = {
-                           id: "chatcmpl-" + Date.now(),
-                           object: "chat.completion.chunk",
-                           created: Math.floor(Date.now() / 1000),
-                           model: model,
-                           choices: [{
-                               index: 0,
-                               delta: { content: text },
-                               finish_reason: null
-                           }]
-                       };
-                       res.write(`data: ${JSON.stringify(openaiChunk)}\n\n`);
-                   }
-                } catch (e) {
-                    // JSON 파싱 에러는 무시 (스트림 중간 끊김 등)
-                }
-            }
-        } catch (e) {
-            console.error("Stream parse error:", e);
-        }
-      });
-
-      response.data.on('end', () => {
+          // 한 방에 다 보내기 (끊김 없음)
+          const chunk = {
+              id: "chatcmpl-" + Date.now(),
+              object: "chat.completion.chunk",
+              created: Math.floor(Date.now() / 1000),
+              model: model,
+              choices: [{
+                  index: 0,
+                  delta: { content: text },
+                  finish_reason: null
+              }]
+          };
+          res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+          
+          // 종료 신호
           res.write('data: [DONE]\n\n');
           res.end();
-      });
+      } else {
+          // 일반 JSON 응답
+          res.json({
+              id: "chatcmpl-" + Date.now(),
+              object: "chat.completion",
+              created: Math.floor(Date.now() / 1000),
+              model: model,
+              choices: [{
+                  index: 0,
+                  message: { role: "assistant", content: text },
+                  finish_reason: "stop"
+              }]
+          });
+      }
 
     } catch (error) {
-      console.error("Gemini Native Error:", error.message);
+      console.error("Gemini Error:", error.message);
       if (error.response) {
           console.error("Error Detail:", JSON.stringify(error.response.data));
+          // 구글 에러를 그대로 클라이언트에 전달
+          return res.status(error.response.status).json(error.response.data);
       }
-      return res.status(500).json({ error: "Gemini Native API Error" });
+      return res.status(500).json({ error: "Gemini Upstream Error" });
     }
-  } else {
+  }
 
   // ---------------------------------------------------------------
   // [B] NVIDIA 처리 구간
