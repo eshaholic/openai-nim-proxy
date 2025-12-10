@@ -8,18 +8,18 @@ const PORT = process.env.PORT || 3000;
 // [1] 환경변수 및 설정
 const NIM_API_BASE = process.env.NIM_API_BASE || 'https://integrate.api.nvidia.com/v1';
 const NIM_API_KEY = process.env.NIM_API_KEY;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY; // ⭐ 구글 키 추가
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY; 
 const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
 
 const SHOW_REASONING = false;
 const ENABLE_THINKING_MODE = false;
 
-// 🔴 [필수] 용량 제한 설정 (기존 코드 유지)
+// 🔴 [필수] 용량 제한 설정
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(cors());
 
-// 모델 매핑 (기존 코드 유지)
+// 모델 매핑
 const MODEL_MAPPING = {
   'gpt-4o': 'meta/llama-3.1-405b-instruct',
   'gpt-4': 'deepseek-ai/deepseek-v3.1-terminus',
@@ -27,7 +27,6 @@ const MODEL_MAPPING = {
   'gpt-3.5-turbo': 'meta/llama-3.1-70b-instruct',
   'claude-3-opus': 'meta/llama-3.1-405b-instruct',
   'gemini-pro': 'deepseek-ai/deepseek-r1' 
-  // Gemini 모델은 아래 로직에서 별도로 처리되므로 매핑 불필요
 };
 
 app.get('/health', (req, res) => {
@@ -41,21 +40,22 @@ app.get('/v1/models', (req, res) => {
     created: Date.now(),
     owned_by: 'nvidia-nim-proxy'
   }));
-  // Gemini 모델 목록 추가 (Janitor에서 보이게)
+  // Gemini 모델 목록 추가
   models.push({ id: 'gemini-2.5-flash', object: 'model', owned_by: 'google' });
   models.push({ id: 'gemini-2.5-pro', object: 'model', owned_by: 'google' });
+  models.push({ id: 'gemini-1.5-flash', object: 'model', owned_by: 'google' }); // 비상용 1.5 추가
   
   res.json({ object: 'list', data: models });
 });
 
 // =================================================================
-// 🚀 통합 채팅 처리 구간 (수정됨)
+// 🚀 통합 채팅 처리 구간
 // =================================================================
 app.post('/v1/chat/completions', async (req, res) => {
   const { model, messages, temperature, max_tokens, stream } = req.body;
 
   // ---------------------------------------------------------------
-  // [A] Gemini 처리 구간 (모델 이름에 'gemini'가 포함되면 이쪽으로)
+  // [A] Gemini 처리 구간 (수정됨: 400 에러 원인 제거)
   // ---------------------------------------------------------------
   if (model && model.toLowerCase().includes('gemini')) {
     if (!GEMINI_API_KEY) {
@@ -69,12 +69,13 @@ app.post('/v1/chat/completions', async (req, res) => {
       // Janitor 요청 복사
       const newBody = { ...req.body };
       
-      // [호환성 수정] OpenAI 엔드포인트는 아래 필드들을 모를 수 있어 제거합니다.
+      // [문제 해결] 구글 API가 싫어하는 옵션들 제거
       if (newBody.repetition_penalty) delete newBody.repetition_penalty;
-
-      // 🚨 [긴급수혈 핵심] OpenAI 호환 엔드포인트 사용 시 safetySettings를 보내면 400 에러가 날 수 있습니다.
-      // 일단 주석 처리하여 요청을 살립니다. (필요 시 Native 엔드포인트로 변경해야 함)
-      /* newBody.safetySettings = [
+      
+      // 🚨 [핵심 수정] 아래 safetySettings가 400 에러의 주범이었습니다.
+      // OpenAI 호환 모드에서는 이 설정을 보내면 에러가 납니다. 주석 처리합니다.
+      /*
+      newBody.safetySettings = [
           { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
           { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
           { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
@@ -88,11 +89,11 @@ app.post('/v1/chat/completions', async (req, res) => {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${GEMINI_API_KEY}`
         },
-        responseType: 'stream', // 스트리밍 필수
+        responseType: 'stream', 
         maxBodyLength: Infinity
       });
 
-      // ⭐ Gemini도 스트리밍 헤더 강제 설정 (무한로딩 방지)
+      // 스트리밍 헤더 설정
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
@@ -100,23 +101,14 @@ app.post('/v1/chat/completions', async (req, res) => {
       return response.data.pipe(res);
 
     } catch (error) {
-      // 🚨 [디버깅 강화] 400 에러의 진짜 내용을 로그에 찍습니다.
-      console.error("Gemini Error Status:", error.response?.status);
+      console.error("Gemini Error:", error.message);
       
-      // 스트림 데이터일 경우 에러 메시지가 버퍼로 올 수 있습니다.
-      if (error.response?.data) {
-          try {
-             // 스트림 에러라 바로 안 보일 수 있어서 문자열 변환 시도
-             const errorData = JSON.stringify(error.response.data); 
-             console.error("Gemini Error Detail:", errorData.substring(0, 500)); 
-          } catch (e) {
-             console.error("Gemini Error Detail (Raw):", error.response.data);
-          }
-      } else {
-          console.error("Gemini Error Message:", error.message);
+      // 에러 내용을 더 자세히 로그에 남김 (디버깅용)
+      if (error.response) {
+          console.error("Gemini Error Data:", JSON.stringify(error.response.data));
+          return res.status(error.response.status).json(error.response.data);
       }
-
-      return res.status(500).json({ error: "Gemini Upstream Error - Check Server Logs" });
+      return res.status(500).json({ error: "Gemini Upstream Error" });
     }
   }
 
