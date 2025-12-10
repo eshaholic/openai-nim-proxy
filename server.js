@@ -49,7 +49,7 @@ app.get('/v1/models', (req, res) => {
 });
 
 // =================================================================
-// 🚀 통합 채팅 처리 구간
+// 🚀 통합 채팅 처리 구간 (수정됨)
 // =================================================================
 app.post('/v1/chat/completions', async (req, res) => {
   const { model, messages, temperature, max_tokens, stream } = req.body;
@@ -66,10 +66,23 @@ app.post('/v1/chat/completions', async (req, res) => {
     try {
       console.log(`🔹 Gemini Request: ${model}`);
       
-      // Janitor 요청 복사 후 호환되지 않는 옵션 제거
+      // Janitor 요청 복사
       const newBody = { ...req.body };
-      if (newBody.repetition_penalty) delete newBody.repetition_penalty;
       
+      // [호환성 수정] OpenAI 엔드포인트는 아래 필드들을 모를 수 있어 제거합니다.
+      if (newBody.repetition_penalty) delete newBody.repetition_penalty;
+
+      // 🚨 [긴급수혈 핵심] OpenAI 호환 엔드포인트 사용 시 safetySettings를 보내면 400 에러가 날 수 있습니다.
+      // 일단 주석 처리하여 요청을 살립니다. (필요 시 Native 엔드포인트로 변경해야 함)
+      /* newBody.safetySettings = [
+          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+      ];
+      */
+
+      // 구글로 전송
       const response = await axios.post(GEMINI_URL, newBody, {
         headers: {
           'Content-Type': 'application/json',
@@ -87,8 +100,23 @@ app.post('/v1/chat/completions', async (req, res) => {
       return response.data.pipe(res);
 
     } catch (error) {
-      console.error("Gemini Error:", error.message);
-      return res.status(500).json({ error: "Gemini Upstream Error" });
+      // 🚨 [디버깅 강화] 400 에러의 진짜 내용을 로그에 찍습니다.
+      console.error("Gemini Error Status:", error.response?.status);
+      
+      // 스트림 데이터일 경우 에러 메시지가 버퍼로 올 수 있습니다.
+      if (error.response?.data) {
+          try {
+             // 스트림 에러라 바로 안 보일 수 있어서 문자열 변환 시도
+             const errorData = JSON.stringify(error.response.data); 
+             console.error("Gemini Error Detail:", errorData.substring(0, 500)); 
+          } catch (e) {
+             console.error("Gemini Error Detail (Raw):", error.response.data);
+          }
+      } else {
+          console.error("Gemini Error Message:", error.message);
+      }
+
+      return res.status(500).json({ error: "Gemini Upstream Error - Check Server Logs" });
     }
   }
 
