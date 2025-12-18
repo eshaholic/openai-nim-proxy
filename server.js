@@ -35,6 +35,8 @@ app.get('/v1/models', (req, res) => {
     created: Date.now(),
     owned_by: 'nvidia-nim-proxy'
   }));
+  models.push({ id: 'gemini-3-pro', object: 'model', owned_by: 'google' });
+  models.push({ id: 'gemini-3-flash-preview', object: 'model', owned_by: 'google' });
   models.push({ id: 'gemini-2.5-flash', object: 'model', owned_by: 'google' });
   models.push({ id: 'gemini-1.5-flash', object: 'model', owned_by: 'google' });
   models.push({ id: 'gemini-1.5-pro', object: 'model', owned_by: 'google' });
