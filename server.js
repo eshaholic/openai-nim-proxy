@@ -10,10 +10,17 @@ const NIM_API_BASE = process.env.NIM_API_BASE || 'https://integrate.api.nvidia.c
 const NIM_API_KEY = process.env.NIM_API_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY; 
 
-// [필수] 용량 제한 설정
+// [필수] 용량 제한 및 CORS 상세 설정
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
-app.use(cors());
+
+// CORS 설정을 더 구체적으로 명시
+app.use(cors({
+  origin: true, // 요청이 들어온 도메인을 그대로 허용 (가장 확실함)
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}));
 
 // 모델 매핑
 const MODEL_MAPPING = {
