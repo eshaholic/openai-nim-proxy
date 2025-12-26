@@ -209,7 +209,7 @@ const nimRequest = {
       responseType: stream ? 'stream' : 'json',
       maxBodyLength: Infinity, 
       maxContentLength: Infinity
-      timeout: 300000
+      timeout: 1200000
     });
 
     if (stream) {
