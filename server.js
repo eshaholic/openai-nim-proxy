@@ -208,7 +208,8 @@ const nimRequest = {
       },
       responseType: stream ? 'stream' : 'json',
       maxBodyLength: Infinity, 
-      maxContentLength: Infinity 
+      maxContentLength: Infinity
+      timeout: 300000
     });
 
     if (stream) {
