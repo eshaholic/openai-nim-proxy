@@ -172,15 +172,32 @@ app.post('/v1/chat/completions', async (req, res) => {
   try {
     let nimModel = MODEL_MAPPING[model] || 'meta/llama-3.1-405b-instruct';
 
-    // 요청 구성 (원본 유지)
-    const nimRequest = {
-      model: nimModel,
-      messages: messages,
-      temperature: temperature || 0.6,
-      max_tokens: max_tokens || 1024,
-      extra_body: ENABLE_THINKING_MODE ? { chat_template_kwargs: { thinking: true } } : undefined,
-      stream: stream || false
-    };
+// 1. 사고 과정(Thinking)이 필요한 모델 리스트 정의
+const thinkingSupportedModels = [
+  'deepseek-ai/deepseek-r1-0528', 
+  'deepseek-ai/deepseek-r1',
+  'gpt-4-turbo',
+  'gemini-pro'
+];
+
+// 2. 현재 요청된 모델(model)이나 매핑된 모델(nimModel)이 사고 지원 모델인지 확인
+const isThinkingModel = thinkingSupportedModels.some(m => 
+  (model && model.toLowerCase().includes(m)) || 
+  (nimModel && nimModel.toLowerCase().includes(m)) ||
+  (nimModel && nimModel.includes('r1'))
+);
+
+const nimRequest = {
+  model: nimModel,
+  messages: messages,
+  temperature: temperature || 0.6,
+  max_tokens: max_tokens || 1024,
+  stream: stream || false,
+  // 사고 지원 모델일 때만 extra_body 주입, 아니면 아예 생략
+  ...(isThinkingModel && { 
+    extra_body: { chat_template_kwargs: { thinking: true } } 
+  })
+};
 
     console.log(`🔸 NVIDIA Request: ${nimModel}`);
 
